@@ -1,0 +1,262 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% EAE 126 Computational Aerodynamics (Spring 2011)
+% Project 8/9 - Transonic Flow - TRANSONIC
+% Daniel Wiese
+
+close all;
+clear all;
+clc;
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Use options [0.8, 0.9, 0.98, 1.08, 1.14, 1.4]
+Minf = 0.98;
+
+% ny must be even
+nx = 100;
+ny = 100;
+
+xmin = -4;
+xmax = -xmin;
+ymin = 0;
+ymax = 24;
+
+dx = (xmax - xmin) / (nx - 1);
+dy = (ymax - ymin) / (ny - 1);
+
+x = linspace(xmin, xmax, nx);
+y = linspace(ymin, ymax, ny);
+
+nLE = round(2 * nx / 5);
+nTE = round(3 * nx / 5) + 1;
+
+% tau - thickness ratio of parabolic profiles and NACA
+% sh - vertical shift for parabolic profiles points on grid
+% coe - 'A' coefficient for parabolic profiles points on grid
+% chord - chordlength of airfoil points on grid
+tau = 0.1;
+sh = tau * x(nTE);
+coe = sh / x(nLE)^2;
+chord = x(nTE) - x(nLE);
+
+% For diamond airfoil
+diamond_slope = tau;
+
+itermax = 10;
+iter2max = 10;
+
+omega = 0.9;
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+for i = 1:nLE-1
+    yB(i) = 0;
+end
+
+% Biconvex
+for i = nLE:nTE
+    yB(i) = -coe * x(i)^2 + sh;
+end
+
+% % Diamond Airfoil (first half)
+% for i = nLE:nx/2
+%     yB(i) = diamond_slope*x(i)+tau*chord/2;
+% end
+
+% % Diamond Airfoil (second half)
+% for i = nx/2+1:nTE
+%     yB(i) = -diamond_slope*x(i)+tau*chord/2;
+% end
+
+% % NACA 00xx
+% for i = nLE:nTE
+%     yB(i) = 5*tau*chord*(0.2969*sqrt((x(i)+chord/2)/chord) - ...
+%             0.1260*((x(i)+chord/2)/chord) - ...
+%             0.3537*((x(i)+chord/2)/chord)^2 + ...
+%             0.2843*((x(i)+chord/2)/chord)^3 - ...
+%             0.1015*((x(i)+chord/2)/chord)^4);
+% end
+
+for i = nTE+1:nx
+    yB(i) = 0;
+end
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+for i = 1:nLE-1
+    d2yBdx2(i) = 0;
+end
+
+for i = nLE:nTE
+    d2yBdx2(i) = (yB(i + 1) - 2 * yB(i) + yB(i - 1)) / dx^2;
+end
+
+for i = nTE+1:nx
+    d2yBdx2(i) = 0;
+end
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+u = zeros(nx,ny);
+uold = zeros(nx,ny);
+
+% u(1,:) = 0;
+% u(2,:) = 0;
+% u(nx,:) = 0;
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Solve for U
+
+iter2 = 1;
+
+while iter2 < iter2max
+
+    if iter2 == 1
+        gamma = -1;
+    else
+        gamma = 1.4;
+    end
+
+    for i = 3:nx-1
+
+        iter = 1;
+
+        while iter < itermax
+
+            for j = 1;
+                fm2 = (1 - Minf^2) * u(i - 2,j) - ((gamma + 1) * Minf^2 * u(i - 2,j)^2) / 2;
+                fm1 = (1 - Minf^2) * u(i - 1,j) - ((gamma + 1) * Minf^2 * u(i - 1,j)^2) / 2;
+                fm0 = (1 - Minf^2) * u(i,    j) - ((gamma + 1) * Minf^2 * u(i,    j)^2) / 2;
+                fp1 = (1 - Minf^2) * u(i + 1,j) - ((gamma + 1) * Minf^2 * u(i + 1,j)^2) / 2;
+
+                TKm2 = 1 - Minf^2 - (gamma + 1) * Minf^2 * u(i - 2, j);
+                TKm1 = 1 - Minf^2 - (gamma + 1) * Minf^2 * u(i - 1, j);
+                TKm0 = 1 - Minf^2 - (gamma + 1) * Minf^2 * u(i,     j);
+                TKp1 = 1 - Minf^2 - (gamma + 1) * Minf^2 * u(i + 1, j);
+
+                % Subsonic
+                if TKm0>0 && TKm1>0
+                    Au(j) = 0;
+                    Bu(j) = -1 / dy^2 - 2 * TKm0 / dx^2;
+                    Cu(j) = 1 / dy^2;
+                    Du(j) = (-1 / dx^2) * (TKp1 * u(i+1,j) + TKm1 * u(i-1,j)) - ...
+                            (fp1 - 2 * fm0 + fm1) / dx^2 + ...
+                            (TKm1 * u(i-1,j) - 2 * TKm0 * u(i,j) + TKp1 * u(i+1,j)) / dx^2 + ...
+                            d2yBdx2(i) / dy;
+                end
+
+                % Supersonic
+                if TKm0<0 && TKm1<0
+                    Au(j) = 0;
+                    Bu(j) = -1 / dy^2 + TKm0 / dx^2;
+                    Cu(j) = 1 / dy^2;
+                    Du(j) = (-1 / dx^2) * (-2 * TKm1 * u(i-1,j) + TKm2 * u(i-2,j)) - ...
+                            (fm0 - 2 * fm1 + fm2) / dx^2 + ...
+                            (TKm0 * u(i,j) - 2 * TKm1*u(i-1,j) + TKm2 * u(i-2,j)) / dx^2 + ...
+                            d2yBdx2(i) / dy;
+                end
+
+                % Parabolic
+                if TKm0<0 && TKm1>0
+                    Au(j) = 0;
+                    Bu(j) = -1 / dy^2;
+                    Cu(j) = 1 / dy^2;
+                    Du(j) = 0;
+                end
+
+                % Shockpoint
+                if TKm0>0 && TKm1<0
+                    Au(j) = 0;
+                    Bu(j) = -1 / dy^2;
+                    Cu(j) = 1 / dy^2;
+                    Du(j) = -(fp1 - fm0) / dx^2;
+                end
+            end
+
+            for j = 2:ny-1
+                fm2 = (1 - Minf^2) * u(i - 2,j) - ((gamma + 1) * Minf^2 * u(i - 2, j)^2) / 2;
+                fm1 = (1 - Minf^2) * u(i - 1,j) - ((gamma + 1) * Minf^2 * u(i - 1, j)^2) / 2;
+                fm0 = (1 - Minf^2) * u(i,    j) - ((gamma + 1) * Minf^2 * u(i,     j)^2) / 2;
+                fp1 = (1 - Minf^2) * u(i + 1,j) - ((gamma + 1) * Minf^2 * u(i + 1, j)^2) / 2;
+
+                TKm2 = 1 - Minf^2 - (gamma + 1) * Minf^2 * u(i - 2, j);
+                TKm1 = 1 - Minf^2 - (gamma + 1) * Minf^2 * u(i - 1, j);
+                TKm0 = 1 - Minf^2 - (gamma + 1) * Minf^2 * u(i,     j);
+                TKp1 = 1 - Minf^2 - (gamma + 1) * Minf^2 * u(i + 1, j);
+
+                % Subsonic
+                if TKm0>0 && TKm1>0
+                    Au(j) = 1 / dy^2;
+                    Bu(j) = -2 / dy^2 - 2 * TKm0 / dx^2;
+                    Cu(j) = 1 / dy^2;
+                    Du(j) = (-1 / dx^2) * (TKp1 * u(i+1,j) + TKm1 * u(i-1,j)) - ...
+                            (fp1 - 2 * fm0 + fm1) / dx^2 + ...
+                            (TKm1 * u(i-1,j) - 2 * TKm0*u(i,j) + TKp1*u(i+1,j)) / dx^2;
+                end
+
+                % Supersonic
+                if TKm0<0 && TKm1<0
+                    Au(j) = 1 / dy^2;
+                    Bu(j) = -2 / dy^2 + TKm0 / dx^2;
+                    Cu(j) = 1 / dy^2;
+                    Du(j) = (-1 / dx^2) * (-2 * TKm1 * u(i-1,j) + TKm2 * u(i-2,j)) - ...
+                            (fm0 - 2 * fm1 + fm2) / dx^2 + ...
+                            (TKm0 * u(i,j) - 2 * TKm1*u(i-1,j) + TKm2 * u(i-2,j)) / dx^2;
+                end
+
+                % Parabolic
+                if TKm0<0 && TKm1>0
+                    Au(j) = 1 / dy^2;
+                    Bu(j) = -2 / dy^2;
+                    Cu(j) = 1 / dy^2;
+                    Du(j) = 0;
+                end
+
+                % Shockpoint
+                if TKm0>0 && TKm1<0
+                    Au(j) = 1 / dy^2;
+                    Bu(j) = -2 / dy^2;
+                    Cu(j) = 1 / dy^2;
+                    Du(j) = -(fp1 - fm0) / dx^2;
+                end
+            end
+
+            for j = ny
+                Au(j) = 0;
+                Bu(j) = 1;
+                Cu(j) = 0;
+                Du(j) = 0;
+            end
+
+            u(i,:) = tridiagscalar(Au, Bu, Cu, Du);
+            u(i,:) = uold(i,:) + omega*(u(i,:) - uold(i,:));
+            uold(i,:) = u(i,:);
+
+            iter = iter + 1;
+
+        end
+    end
+    iter2 = iter2 + 1
+end
+
+u(nx,:) = u(nx-1,:);
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+figure()
+contour(x,y,u',500)
+hold on
+contour(x,-y,u',500)
+daspect([1 1 1])
+axis([xmin xmax -ymax ymax])
+plot(x,yB,'-k')
+plot(x,-yB,'-k')
+plot_title1 = strcat( ...
+    'Transonic Flow: Ma =  ', sprintf('%0.2f',Minf), ...
+    ', \omega =  ', sprintf('%0.2f',omega), ...
+    ', Iterations =  ',sprintf('%3.0f',iter2max));
+title(plot_title1)
+xlabel('u-direction')
+ylabel('v-direction')
+colorbar
+grid on
